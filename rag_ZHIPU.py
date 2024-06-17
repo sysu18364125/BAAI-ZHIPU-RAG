@@ -1,14 +1,24 @@
-import bs4
-from langchain_chroma import Chroma
-from langchain_community.document_loaders import WebBaseLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+import os
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from langchain_community.embeddings import HuggingFaceBgeEmbeddings
 from langchain_community.chat_models import ChatZhipuAI
 from langchain_core.messages import HumanMessage, SystemMessage
-import os
 
-# 设置 ZhipuAI API Key
-os.environ["ZHIPUAI_API_KEY"] = "6e6ed0250d64a8eb9b9eca14603fc4e6.tjS2gPaEz1RZYc7q"
+# 加载 .env 文件中的环境变量
+load_dotenv()
+
+# 从环境变量中读取 ZhipuAI API Key
+api_key = os.getenv("ZHIPUAI_API_KEY")
+
+if not api_key:
+    raise ValueError("ZHIPUAI_API_KEY 环境变量未设置")
+
+os.environ["ZHIPUAI_API_KEY"] = api_key
+
+# 初始化 FastAPI 应用
+app = FastAPI()
 
 # 初始化 HuggingFaceBgeEmbeddings 模型
 model_name = "BAAI/bge-small-zh-v1.5"
@@ -21,45 +31,17 @@ hf_embeddings = HuggingFaceBgeEmbeddings(
     query_instruction="为这个句子生成表示以用于检索相关文章："
 )
 
-# 加载、切分和索引博客内容
-loader = WebBaseLoader(
-    web_paths=("https://lilianweng.github.io/posts/2023-06-23-agent/",),
-    bs_kwargs=dict(
-        parse_only=bs4.SoupStrainer(
-            class_=("post-content", "post-title", "post-header")
-        )
-    ),
-)
-docs = loader.load()
-
-# 文本切分
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-splits = text_splitter.split_documents(docs)
-
-# 创建向量存储并使用 HuggingFaceBgeEmbeddings 进行嵌入生成
-vectorstore = Chroma.from_documents(documents=splits, embedding=hf_embeddings)
-
-# 检索和生成使用博客的相关片段
-retriever = vectorstore.as_retriever()
-
-# 格式化文档
-def format_docs(docs):
-    return "\n\n".join(doc.page_content for doc in docs)
-
 # 自定义提示模板
-def custom_prompt(context, question):
-    return f"""你是一个智能助手，任务是根据提供的文档内容回答问题。请按照以下格式分点作答：
+def custom_prompt(question):
+    return f"""你是一个智能助手，任务是根据提供的问题生成回答。请按照以下格式分点作答：
 1. 要点一
 2. 要点二
 3. 要点三
 
-上下文内容如下：
-{context}
-
 问题如下：
 {question}
 
-请基于上述内容给出你的回答。"""
+请基于上述问题给出你的回答。"""
 
 # 初始化 ZhipuAI 生成模型
 chat = ChatZhipuAI(
@@ -69,9 +51,7 @@ chat = ChatZhipuAI(
 
 # 创建 RAG 链条
 def rag_chain(question):
-    retrieved_docs = retriever.get_relevant_documents(question)
-    context = format_docs(retrieved_docs)
-    prompt_text = custom_prompt(context, question)
+    prompt_text = custom_prompt(question)
     messages = [
         SystemMessage(content="You are a helpful assistant."),
         HumanMessage(content=prompt_text),
@@ -79,6 +59,17 @@ def rag_chain(question):
     response = chat.invoke(messages)
     return response.content
 
-# 执行查询
-response = rag_chain("任务分解是什么？")
-print("Answer:", response)
+class QueryModel(BaseModel):
+    question: str
+
+@app.post("/ask")
+async def ask_question(query: QueryModel):
+    try:
+        answer = rag_chain(query.question)
+        return {"answer": answer}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

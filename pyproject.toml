@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "baai-zhipu-rag"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.13"
+fastapi = ">=0.95.2,<1"
+uvicorn = "0.18.3"
+bs4 = "^0.0.1"
+python-dotenv = "^0.20.0"
+langchain-chroma = "^0.1.1"
+langchain-community = "^0.2.5"
+sentence-transformers = "^2.2.2"
+python-jose = "^3.3.0"
+pyjwt = "^2.8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
